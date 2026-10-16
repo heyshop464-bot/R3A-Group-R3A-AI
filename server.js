@@ -25,7 +25,9 @@ if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", 'data:'], connectSrc: ["'self'"], objectSrc: ["'none'"], baseUri: ["'self'"], frameAncestors: ["'none'"] } } }));
 app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
 app.use(express.json({ limit: '32kb' }));
-app.use(express.static(path.join(__dirname, '..', 'public'), { index: 'index.html', maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0 }));
+// Serve static files. index.html lives at repository root for this project, so serve from __dirname.
+// If you later move static assets into a ./public directory, update this path accordingly.
+app.use(express.static(path.join(__dirname), { index: 'index.html', maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0 }));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-8', legacyHeaders: false }));
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'R3A AI API', time: new Date().toISOString() }));
@@ -39,14 +41,14 @@ app.get('/api/payment/instructions', (_req, res) => res.json({
   mode: 'manual',
   automaticVerification: false,
   currency: 'EGP',
-  message: 'يحّول العميل إلى الرقم، ثم يرسل طلبًا من حسابه. يراجع المشرف سجل المحفظة الفعلي؛ وبعد التحقق يعتمد الطلب فيضيف النظام الرصيد لمحفظة العميل مرة واحدة. لا تتم إضافة الرصيد تلقائيًا.'
+  message: 'يحّول العميل إلى الرقم، ثم يرسل طلبًا من حسابه. يراجع المشرف سجل المحفظة الفعلي؛ وبعد التحقق يعتمد الطلب.'
 }));
 
 const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false });
 const registerSchema = z.object({ email: z.string().email().max(254), password: z.string().min(12).max(128) });
 const loginSchema = z.object({ email: z.string().email().max(254), password: z.string().min(1).max(128) });
-const topupSchema = z.object({ amount: z.coerce.number().finite().min(1).max(1000000), providerReference: z.string().trim().min(4).max(120), senderName: z.string().trim().max(120).optional(), notes: z.string().trim().max(1000).optional() });
-const campaignSchema = z.object({ platform: z.string().trim().min(2).max(40), goal: z.string().trim().min(2).max(100), title: z.string().trim().min(2).max(120), budget: z.coerce.number().finite().min(0).max(10000000), targetUrl: z.string().trim().max(2000).optional().or(z.literal('')), durationDays: z.coerce.number().int().min(1).max(365).optional(), audience: z.string().trim().max(3000).optional(), method: z.string().trim().max(100).optional() });
+const topupSchema = z.object({ amount: z.coerce.number().finite().min(1).max(1000000), providerReference: z.string().trim().min(4).max(120), senderName: z.string().trim().max(120).optional(), notes: z.string().trim().max(500).optional() });
+const campaignSchema = z.object({ platform: z.string().trim().min(2).max(40), goal: z.string().trim().min(2).max(100), title: z.string().trim().min(2).max(120), budget: z.coerce.number().finite().min(0) });
 const ticketSchema = z.object({ category: z.string().trim().min(2).max(80), title: z.string().trim().min(2).max(120), body: z.string().trim().min(5).max(5000) });
 
 function signToken(user) {
@@ -61,9 +63,9 @@ const requireAuth = asyncRoute(async (req, res, next) => {
     const user = await prisma.user.findUnique({ where: { id: claims.sub }, select: { id: true, email: true, role: true } });
     if (!user) return res.status(401).json({ error: 'الجلسة غير صالحة.' });
     req.user = user; next();
-  } catch { return res.status(401).json({ error: 'انتهت الجلسة أو أنها غير صالحة.' }); }
+  } catch (err) { return res.status(401).json({ error: 'انتهت الجلسة أو أنها غير صالحة.' }); }
 });
-const requireAdmin = (req, res, next) => (req.user?.role === 'ADMIN' && req.user?.email?.toLowerCase() === ADMIN_EMAIL) ? next() : res.status(403).json({ error: 'هذه العملية للمشرف الوحيد المصرّح به فقط.' });
+const requireAdmin = (req, res, next) => (req.user?.role === 'ADMIN' && req.user?.email?.toLowerCase() === ADMIN_EMAIL) ? next() : res.status(403).json({ error: 'هذه العملية للمشرف فقط.' });
 async function audit(tx, actorId, action, entity, entityId, metadata = undefined) {
   await tx.auditLog.create({ data: { actorId, action, entity, entityId, ...(metadata ? { metadata } : {}) } });
 }
@@ -115,8 +117,6 @@ app.post('/api/admin/topups/:id/approve', requireAuth, requireAdmin, asyncRoute(
     const topup = await tx.topUpRequest.findUnique({ where: { id: req.params.id } });
     if (!topup) { const e = new Error('طلب الشحن غير موجود.'); e.status = 404; throw e; }
     if (topup.status !== 'PENDING') { const e = new Error('تمت مراجعة هذا الطلب مسبقًا.'); e.status = 409; throw e; }
-    // This endpoint is for manual reconciliation after the admin independently checks the wallet/provider statement.
-    // A checkbox or receipt image alone is not verification. Provider API integration is not configured by default.
     const wallet = await tx.wallet.findUnique({ where: { userId: topup.userId } });
     if (!wallet) { const e = new Error('محفظة المستخدم غير موجودة.'); e.status = 409; throw e; }
     const nextBalance = new Prisma.Decimal(wallet.balance).plus(topup.amount);
@@ -198,12 +198,12 @@ app.use((err, _req, res, _next) => {
   if (err instanceof z.ZodError) return res.status(400).json({ error: 'بيانات غير صالحة.', details: err.issues.map(i => ({ field: i.path.join('.'), message: i.message })) });
   if (err?.code === 'P2002') {
     const target = Array.isArray(err.meta?.target) ? err.meta.target.join(',') : String(err.meta?.target || '');
-    const message = target.includes('providerReference') ? 'رقم مرجع العملية مستخدم من قبل؛ راجع الرقم ولا تعاود الإرسال.' : target.includes('email') ? 'هذا البريد مسجل بالفعل.' : 'تعارض في قيمة فريدة؛ راجع البيانات المدخلة.';
+    const message = target.includes('providerReference') ? 'رقم مرجع العملية مستخدم من قبل؛ راجع الرقم ولا تعاود الإرسال.' : target.includes('email') ? 'البريد الإلكتروني مستخدم بالفعل.' : 'تعارض فريد في قاعدة البيانات.';
     return res.status(409).json({ error: message });
   }
   if (err?.code === 'P2034') return res.status(409).json({ error: 'تعارض أثناء المعالجة؛ أعد المحاولة بعد التحقق من حالة الطلب.' });
   const status = err.status || 500;
-  if (status === 500) console.error('Unhandled server error:', err.message);
+  if (status === 500) console.error('Unhandled server error:', err.message || err);
   res.status(status).json({ error: status === 500 ? 'حدث خطأ داخلي.' : err.message });
 });
 
