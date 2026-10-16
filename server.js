@@ -35,14 +35,9 @@ app.get('/api/ready', asyncRoute(async (_req, res) => {
   await prisma.$queryRaw`SELECT 1`;
   res.json({ ok: true, database: 'connected', time: new Date().toISOString() });
 }));
-app.get('/api/payment/instructions', (_req, res) => res.json({
-  provider: process.env.PAYMENT_PROVIDER_LABEL || 'اتصالات كاش',
-  phone: process.env.PAYMENT_WALLET_PHONE || '01114887511',
-  mode: 'manual',
-  automaticVerification: false,
-  currency: 'EGP',
-  message: 'يحّول العميل إلى الرقم، ثم يرسل طلبًا من حسابه. يراجع المشرف سجل المحفظة الفعلي؛ وبعد التحقق يعتمد الطلب.'
-}));
+
+// Payment endpoints are disabled by configuration for this deployment.
+app.get('/api/payment/instructions', (_req, res) => res.json({ enabled: false, message: 'خدمة الدفع مؤقتًا غير متاحة. تواصل مع المشرف للحصول على تعليمات الدفع.' }));
 
 const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false });
 const registerSchema = z.object({ email: z.string().email().max(254), password: z.string().min(12).max(128) });
@@ -198,15 +193,4 @@ app.use((err, _req, res, _next) => {
   if (err instanceof z.ZodError) return res.status(400).json({ error: 'بيانات غير صالحة.', details: err.issues.map(i => ({ field: i.path.join('.'), message: i.message })) });
   if (err?.code === 'P2002') {
     const target = Array.isArray(err.meta?.target) ? err.meta.target.join(',') : String(err.meta?.target || '');
-    const message = target.includes('providerReference') ? 'رقم مرجع العملية مستخدم من قبل؛ راجع الرقم ولا تعاود الإرسال.' : target.includes('email') ? 'البريد الإلكتروني مستخدم بالفعل.' : 'تعارض فريد في قاعدة البيانات.';
-    return res.status(409).json({ error: message });
-  }
-  if (err?.code === 'P2034') return res.status(409).json({ error: 'تعارض أثناء المعالجة؛ أعد المحاولة بعد التحقق من حالة الطلب.' });
-  const status = err.status || 500;
-  if (status === 500) console.error('Unhandled server error:', err.message || err);
-  res.status(status).json({ error: status === 500 ? 'حدث خطأ داخلي.' : err.message });
-});
-
-const server = app.listen(PORT, () => console.log(`R3A AI API listening on port ${PORT}`));
-async function shutdown() { server.close(async () => { await prisma.$disconnect(); process.exit(0); }); }
-process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
+    const message = target.includes('providerReference') ? 'رقم مرجع العملية مستخدم من قبل؛ راجع الرقم ولا تعاود الإرسال.' : target.includes('ema[...]
