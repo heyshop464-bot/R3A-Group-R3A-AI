@@ -3,13 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "description": "R3A AI Arabic social growth platform starter",
-  "main": "server.js",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
-    "admin:create": "node create-admin.js",
+    "admin:create": "node src/create-admin.js",
     "test": "node --test"
   },
   "engines": {
