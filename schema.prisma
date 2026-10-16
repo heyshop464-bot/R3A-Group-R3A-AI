@@ -1,0 +1,142 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+enum TopUpStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+enum LedgerType {
+  TOPUP
+  CREDIT
+  DEBIT
+  REFUND
+}
+enum CampaignStatus {
+  DRAFT
+  QUEUED
+  RUNNING
+  COMPLETED
+  CANCELLED
+}
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  role         Role         @default(USER)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  wallet       Wallet?
+  topUps       TopUpRequest[] @relation("TopUpOwner")
+  reviewedTopUps TopUpRequest[] @relation("TopUpReviewer")
+  campaigns    Campaign[]
+  tickets      SupportTicket[]
+  auditEvents  AuditLog[]
+}
+
+model Wallet {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  balance   Decimal  @default(0) @db.Decimal(14, 2)
+  currency  String   @default("EGP")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ledger    WalletLedger[]
+}
+
+model TopUpRequest {
+  id                String       @id @default(cuid())
+  userId            String
+  amount            Decimal      @db.Decimal(14, 2)
+  currency          String       @default("EGP")
+  providerReference String       @unique
+  senderName        String?
+  notes             String?
+  status            TopUpStatus  @default(PENDING)
+  verifiedReceived  Boolean      @default(false)
+  reviewedById      String?
+  reviewedAt        DateTime?
+  rejectionReason   String?
+  createdAt         DateTime     @default(now())
+  user              User         @relation("TopUpOwner", fields: [userId], references: [id], onDelete: Restrict)
+  reviewer          User?        @relation("TopUpReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  ledgerEntry       WalletLedger?
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model WalletLedger {
+  id          String      @id @default(cuid())
+  walletId    String
+  topUpId     String?     @unique
+  type        LedgerType
+  amount      Decimal     @db.Decimal(14, 2)
+  balanceAfter Decimal    @db.Decimal(14, 2)
+  description String
+  createdAt   DateTime    @default(now())
+  wallet      Wallet      @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  topUp       TopUpRequest? @relation(fields: [topUpId], references: [id], onDelete: Restrict)
+  @@index([walletId, createdAt])
+}
+
+model Campaign {
+  id          String         @id @default(cuid())
+  userId      String
+  platform    String
+  goal        String
+  title       String
+  budget      Decimal        @db.Decimal(14, 2)
+  targetUrl   String?
+  durationDays Int?
+  audience    String?
+  method      String?
+  status      CampaignStatus @default(DRAFT)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
+}
+
+model SupportTicket {
+  id        String       @id @default(cuid())
+  userId    String
+  category  String
+  title     String
+  body      String
+  status    TicketStatus @default(OPEN)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String
+  metadata  Json?
+  createdAt DateTime @default(now())
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  @@index([entity, entityId])
+  @@index([createdAt])
+}

@@ -1,0 +1,31 @@
+# نشر تجريبي على Render. الخطة المجانية ليست مناسبة للإنتاج؛ راجع DEPLOYMENT_CHECKLIST_AR.md.
+services:
+  - type: web
+    name: r3a-ai
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/ready
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: r3a-ai-db
+          property: connectionString
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: PAYMENT_PROVIDER_LABEL
+        value: اتصالات كاش
+      - key: PAYMENT_WALLET_PHONE
+        value: "01114887511"
+      - key: PAYMENT_MODE
+        value: manual
+      - key: CORS_ORIGIN
+        value: https://r3a-ai.onrender.com
+databases:
+  - name: r3a-ai-db
+    databaseName: r3a_ai
+    user: r3a_ai_user
+    plan: free
